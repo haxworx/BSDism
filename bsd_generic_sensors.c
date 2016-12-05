@@ -148,7 +148,7 @@ bsd_generic_audio_state_master(results_t * results)
 	free(info);
 
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
-
+    // FIXME: TODO
 #endif
     return (results->have_mixer);
 
@@ -199,7 +199,11 @@ bsd_generic_temperature_state(results_t * results)
     results->temperature = temp;
 
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
-
+    unsigned int value;
+    size_t len = sizeof(value);
+    if ((sysctlbyname("hw.acpi.thermal.tz0.temperature", &value, &len, NULL, 0)) != -1 ) {
+        results->temperature = (value - 2732) / 10;
+    }
 #endif
 }
 
@@ -214,7 +218,7 @@ bsd_generic_mibs_power_get(results_t * results)
     int i;
     int mib[5] = {CTL_HW, HW_SENSORS, 0, 0, 0};
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
-
+    size_t len;
 #endif
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
@@ -247,7 +251,15 @@ bsd_generic_mibs_power_get(results_t * results)
 	}
     }
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
+    if ((sysctlbyname("hw.acpi.battery.life", NULL, &len, NULL, 0)) != -1) {
+        results->mibs.bat_mib[results->battery_index] = malloc(sizeof(int) * 5);
+	sysctlnametomib("hw.acpi.battery.life", results->mibs.bat_mib[results->battery_index], &len);
+	result++;
+    }
 
+    if ((sysctlbyname("hw.acpi.acline", NULL, &len, NULL, 0)) != -1) {
+         sysctlnametomib("hw.acpi.acline", results->mibs.pwr_mib, &len);
+    }
 
 #endif
  
@@ -292,22 +304,37 @@ bsd_generic_battery_state_get(int *mib, results_t * results)
      results->last_full_charge += last_full_charge;
      results->current_charge += current_charge;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
-
+    unsigned int value;
+    size_t len = sizeof(value);
+    if ((sysctl(mib, 4, &value, &len, NULL, 0)) != -1)
+       results->battery_percent = value;
 
 #endif
 }
 
 static void bsd_generic_power_state(results_t *results)
 {
-#if defined(__OpenBSD__) || defined(__NetBSD__)
     int i;
+#if defined(__OpenBSD__) || defined(__NetBSD__)
     int have_power = 0;
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+    unsigned int value;
+    size_t len;
+#endif
 
+#if defined(__OpenBSD__) || defined(__NetBSD__)
     results->mibs.pwr_mib[3] = 9;
     results->mibs.pwr_mib[4] = 0;
 
     if (sysctl(results->mibs.pwr_mib, 5, &snsr, &slen, NULL, 0) != -1)
 	have_power = (int) snsr.value;
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+    len = sizeof(value);
+    if ((sysctl(results->mibs.pwr_mib, 3, &value, &len, NULL, 0)) == -1) {
+        return;
+    }
+    results->have_power = value;
+#endif
 
     // get batteries here
     for (i = 0; i < results->battery_index; i++) {
@@ -317,12 +344,19 @@ static void bsd_generic_power_state(results_t *results)
     for (i = 0; i < results->battery_index; i++)
         free(results->mibs.bat_mib[i]);
 
+#if defined(__OpenBSD__) || defined(__NetBSD__)
     double percent = 100 * (results->current_charge / results->last_full_charge);
 
     results->battery_percent = (int) percent;
     results->have_power = have_power;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
+    len = sizeof(value);
+    if ((sysctl(results->mibs.bat_mib[0], 4, &value, &len, NULL, 0)) == -1) {
+        return;
+    }
 
+    results->battery_percent = value;
+  
 #endif
 }
 
