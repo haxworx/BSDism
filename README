@@ -1,0 +1,17 @@
+Some sensors tools for statuslines on:
+
+FreeBSD and DragonFly BSD and
+
+OpenBSD and NetBSD.
+
+Included a tmux.conf.
+
+Binding CTRL + ACTION + U = volume up
+	CTRL + ACTION + I = volume down
+
+Install:
+	make
+
+Do enjoy!
+
+Al Poole <netstar@gmail.com>
