@@ -6,8 +6,10 @@ OpenBSD and NetBSD.
 
 Included a tmux.conf.
 
-Binding CTRL + ACTION + U = volume up
-	CTRL + ACTION + I = volume down
+[ACTION BOUND to 'j']
+
+Binding CTRL + ACTION + u = volume up
+	CTRL + ACTION + j = volume down
 
 Install:
 	make
