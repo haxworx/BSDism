@@ -35,11 +35,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/ioctl.h>
+
 #if defined(__OpenBSD__) || defined(__FreeBSD__)
 #include <sys/sensors.h>
 #include <sys/audioio.h>
 #endif
 
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+#include <sys/soundcard.h>
+#endif
 /* Variables for output */
 static bool audio_output_simple = true;
 
@@ -81,7 +85,7 @@ struct results_t {
 static int 
 bsd_generic_audio_state_master(results_t * results)
 {
-#if defined(__OpenBSD__) || defined(__NetBSD__)
+#if defined(__OpenBSD__) || defined(__NetBSD__) 
     int 	    i;
     mixer_devinfo_t dinfo;
     mixer_ctrl_t   *values = NULL;
@@ -148,7 +152,17 @@ bsd_generic_audio_state_master(results_t * results)
 	free(info);
 
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
-    // FIXME: TODO
+    int bar;
+    int fd = open("/dev/mixer", O_RDONLY);
+    if (fd == -1) return (0);
+
+    if ((ioctl(fd, MIXER_READ(0), &bar)) == -1) {
+        return (0);
+    }
+    results->have_mixer = true;
+    results->volume_left = bar & 0x7f;
+    results->volume_right = (bar >> 8) & 0x7f;
+    close(fd);
 #endif
     return (results->have_mixer);
 
@@ -382,14 +396,24 @@ results_show(results_t results)
     printf(" [TEMP]: %dC", results.temperature);
 
     if (results.have_mixer) {
-	if (audio_output_simple) {
 	    uint8_t 	    high = results.volume_right > results.volume_left ?
 	    results.volume_right : results.volume_left;
+#if defined(__OpenBSD__) || defined(__NetBSD__)
+	if (audio_output_simple) {
 	    uint8_t 	    perc = get_percent(high, 255);
 	    printf(" [AUDIO]: %d%%", perc);
 	} else
 	    printf(" [AUDIO] L: %d R: %d", results.volume_left,
 		   results.volume_right);
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+	if (audio_output_simple) {
+		uint8_t perc = get_percent(high, 100);
+		printf(" [AUDIO]: %d%%", perc);
+	} else
+		printf(" [AUDIO] L: %d R: %d", results.volume_left,
+		       results.volume_right);
+
+#endif
     }
     printf("\n");
 }
