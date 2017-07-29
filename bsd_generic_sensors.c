@@ -32,19 +32,23 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
+#include <sys/types.h>
 #include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/ioctl.h>
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
+#include <sys/swap.h>
+#include <sys/mount.h>
 #include <sys/sensors.h>
 #include <sys/audioio.h>
 #endif
 
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 #include <sys/soundcard.h>
+#include <vm/vm_param.h>
 #endif
-/* Variables for output */
+
 static bool audio_output_simple = true;
 
 
@@ -60,27 +64,191 @@ int devn;
 
 /* If there is > 1 battery just add the values */
 #define MAX_BATTERIES 5
-typedef struct mibs_t mibs_t;
-struct mibs_t {
+
+typedef struct {
     int *bat_mib[5];
     int pwr_mib[5];
     int temperature_mib[5];
-};
+} mibs_t;
+
+typedef struct {
+    unsigned long total;
+    unsigned long used;
+    unsigned long cached;
+    unsigned long buffered;
+    unsigned long shared;
+    unsigned long swap_total;
+    unsigned long swap_used;
+} meminfo_t;
+
+typedef struct {
+    bool have_ac;
+    int battery_index;
+    uint8_t percent;
+    double last_full_charge;
+    double current_charge;
+} power_t;
+
+typedef struct {
+    bool enabled;
+    uint8_t volume_left;
+    uint8_t volume_right;
+} mixer_t;
 
 typedef struct results_t results_t;
 struct results_t {
     mibs_t          mibs;
-    bool 	    have_power;
-    uint8_t 	    battery_percent;
-    bool 	    is_centigrade;
+    meminfo_t       memory;
+    power_t         power;
+    mixer_t         mixer;
     uint8_t 	    temperature;
-    bool 	    have_mixer;
-    uint8_t 	    volume_left;
-    uint8_t 	    volume_right;
-    int             battery_index;
-    double          last_full_charge;
-    double          current_charge;
 };
+
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+static long int
+_sysctlfromname(const char *name, void *mib, int depth, size_t *len)
+{  
+    long int result;
+   
+    if (sysctlnametomib(name, mib, len) < 0) return -1;
+   
+    *len = sizeof(result); 
+    if (sysctl(mib, depth, &result, len, NULL, 0) < 0) return -1;
+   
+    return result;
+}
+#endif
+
+void _memsize_bytes_to_kb(unsigned long *bytes)
+{  
+     *bytes = (unsigned int) *bytes >> 10;
+}
+
+#define _memsize_kb_to_mb _memsize_bytes_to_kb
+
+static void
+bsd_generic_meminfo(meminfo_t *memory)
+{
+   size_t len;
+   int i = 0;
+   memset(memory, 0, sizeof(meminfo_t));
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+   int total_pages = 0, free_pages = 0, inactive_pages = 0;
+   long int result = 0;
+   int page_size = getpagesize();
+
+   int *mib = malloc(sizeof(int) * 4);
+   if (mib == NULL) return;
+
+   mib[0] = CTL_HW; mib[1] = HW_PHYSMEM;
+   len = sizeof(memory->total);
+   if (sysctl(mib, 2, &memory->total, &len, NULL, 0) == -1)
+     return;
+   memory->total /= 1024;
+
+   total_pages = _sysctlfromname("vm.stats.vm.v_page_count", mib, 4, &len);
+   if (total_pages < 0) return;
+
+   free_pages = _sysctlfromname("vm.stats.vm.v_free_count", mib, 4, &len);
+   if (free_pages < 0) return;
+
+   inactive_pages = _sysctlfromname("vm.stats.vm.v_inactive_count", mib, 4,  &len);
+   if (inactive_pages < 0) return;
+
+   *mem_used = (total_pages - free_pages - inactive_pages) * page_size;
+   _memsize_bytes_to_kb(&memory->mem_used);
+
+   result = _sysctlfromname("vfs.bufspace", mib, 2, &len);
+   if (result < 0) return;
+   memori->buffered = (result);
+   _memsize_bytes_to_kb(&memory->buffered);
+
+   result = _sysctlfromname("vm.stats.vm.v_active_count", mib, 4, &len);
+   if (result < 0) return;
+   memory->cached = (result * page_size);
+   _memsize_bytes_to_kb(&memory->cached);
+
+   result = _sysctlfromname("vm.stats.vm.v_cache_count", mib, 4, &len);
+   if (result < 0) return;
+   memory->shared = (result * page_size);
+   _memsize_bytes_to_kb(&memory->shared);
+
+   result = _sysctlfromname("vm.swap_total", mib, 2, &len);
+   if (result < 0) return;
+   memory->swap_total = (result / 1024);
+
+   struct xswdev xsw;
+   // previous mib is important for this one...
+
+   while (i++)
+     {
+        mib[2] = i;
+        len = sizeof(xsw);
+        if (sysctl(mib, 3, &xsw, &len, NULL, 0) == -1) break;
+
+        memory->swap_used += xsw.xsw_used * page_size;
+     }
+
+   memory->swap_used >>= 10;
+
+   free(mib);
+#elif defined(__OpenBSD__)
+   static int mib[] = { CTL_HW, HW_PHYSMEM64 };
+   static int bcstats_mib[] = { CTL_VFS, VFS_GENERIC, VFS_BCACHESTAT };
+   struct bcachestats bcstats;
+   static int uvmexp_mib[] = { CTL_VM, VM_UVMEXP };
+   struct uvmexp uvmexp;
+   int nswap, rnswap;
+   struct swapent *swdev = NULL;
+
+   len = sizeof(memory->total);
+   if (sysctl(mib, 2, &memory->total, &len, NULL, 0) == -1)
+     return;
+
+   len = sizeof(uvmexp);
+   if (sysctl(uvmexp_mib, 2, &uvmexp, &len, NULL, 0) == -1)
+     return;
+
+   len = sizeof(bcstats);
+   if (sysctl(bcstats_mib, 3, &bcstats, &len, NULL, 0) == -1)
+     return;
+
+   // Don't fail if there's not swap!
+   nswap = swapctl(SWAP_NSWAP, 0, 0);
+   if (nswap == 0) goto swap_out;
+
+   swdev = calloc(nswap, sizeof(*swdev));
+   if (swdev == NULL) goto swap_out;
+
+   rnswap = swapctl(SWAP_STATS, swdev, nswap);
+   if (rnswap == -1) goto swap_out;
+
+   for (i = 0; i < nswap; i++)// nswap; i++)
+      {
+         if (swdev[i].se_flags & SWF_ENABLE)
+           {
+              memory->swap_used += (swdev[i].se_inuse / (1024 / DEV_BSIZE));
+              memory->swap_total += (swdev[i].se_nblks / (1024 / DEV_BSIZE));
+           }
+      }
+swap_out:
+   if (swdev) free(swdev);
+
+   memory->total /= 1024;
+
+   memory->cached  = (uvmexp.pagesize * bcstats.numbufpages);
+   _memsize_bytes_to_kb(&memory->cached);
+
+   memory->used  = (uvmexp.active * uvmexp.pagesize);
+   _memsize_bytes_to_kb(&memory->used);
+
+   memory->buffered = (uvmexp.pagesize * (uvmexp.npages - uvmexp.free));
+   _memsize_bytes_to_kb(&memory->buffered);
+
+   memory->shared = (uvmexp.pagesize * uvmexp.wired);
+   _memsize_bytes_to_kb(&memory->shared);
+#endif
+}
 
 static int 
 bsd_generic_audio_state_master(results_t * results)
@@ -110,7 +278,7 @@ bsd_generic_audio_state_master(results_t * results)
 	if (ioctl(fd, AUDIO_MIXER_DEVINFO, &info[i]) == -1) {
 	    --devn;
 	    --i;
-	    results->have_mixer = true;
+	    results->mixer.enabled = true;
 	    continue;
 	}
     }
@@ -137,9 +305,9 @@ bsd_generic_audio_state_master(results_t * results)
     for (i = 0; i < devn; i++) {
 	strlcpy(name, info[i].label.name, sizeof(name));
 	if (!strcmp("master", name)) {
-	    results->volume_left = values[i].un.value.level[0];
-	    results->volume_right = values[i].un.value.level[1];
-	    results->have_mixer = true;
+	    results->mixer.volume_left = values[i].un.value.level[0];
+	    results->mixer.volume_right = values[i].un.value.level[1];
+	    results->mixer.enabled = true;
 	    break;
 	}
     }
@@ -159,12 +327,12 @@ bsd_generic_audio_state_master(results_t * results)
     if ((ioctl(fd, MIXER_READ(0), &bar)) == -1) {
         return (0);
     }
-    results->have_mixer = true;
-    results->volume_left = bar & 0x7f;
-    results->volume_right = (bar >> 8) & 0x7f;
+    results->mixer.enabled = true;
+    results->mixer.volume_left = bar & 0x7f;
+    results->mixer.volume_right = (bar >> 8) & 0x7f;
     close(fd);
 #endif
-    return (results->have_mixer);
+    return (results->mixer.enabled);
 
 }
 
@@ -249,8 +417,8 @@ bsd_generic_mibs_power_get(results_t * results)
             char buf[64];
             snprintf(buf, sizeof(buf), "acpibat%d", i);
        	    if (!strcmp(buf, snsrdev.xname)) {
-                results->mibs.bat_mib[results->battery_index] = malloc(sizeof(int) * 5);
-       	        int *tmp = results->mibs.bat_mib[results->battery_index++];
+                results->mibs.bat_mib[results->power.battery_index] = malloc(sizeof(int) * 5);
+       	        int *tmp = results->mibs.bat_mib[results->power.battery_index++];
         	tmp[0] = mib[0];
         	tmp[1] = mib[1];
         	tmp[2] = mib[2];
@@ -266,8 +434,8 @@ bsd_generic_mibs_power_get(results_t * results)
     }
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
     if ((sysctlbyname("hw.acpi.battery.life", NULL, &len, NULL, 0)) != -1) {
-        results->mibs.bat_mib[results->battery_index] = malloc(sizeof(int) * 5);
-	sysctlnametomib("hw.acpi.battery.life", results->mibs.bat_mib[results->battery_index], &len);
+        results->mibs.bat_mib[results->power.battery_index] = malloc(sizeof(int) * 5);
+	sysctlnametomib("hw.acpi.battery.life", results->mibs.bat_mib[results->power.battery_index], &len);
 	result++;
     }
 
@@ -315,13 +483,13 @@ bsd_generic_battery_state_get(int *mib, results_t * results)
 	    current_charge = (double) snsr.value;
     }
 
-     results->last_full_charge += last_full_charge;
-     results->current_charge += current_charge;
+     results->power.last_full_charge += last_full_charge;
+     results->power.current_charge += current_charge;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
     unsigned int value;
     size_t len = sizeof(value);
     if ((sysctl(mib, 4, &value, &len, NULL, 0)) != -1)
-       results->battery_percent = value;
+       results->power.battery_percent = value;
 
 #endif
 }
@@ -330,7 +498,7 @@ static void bsd_generic_power_state(results_t *results)
 {
     int i;
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-    int have_power = 0;
+    int have_ac = 0;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
     unsigned int value;
     size_t len;
@@ -341,35 +509,35 @@ static void bsd_generic_power_state(results_t *results)
     results->mibs.pwr_mib[4] = 0;
 
     if (sysctl(results->mibs.pwr_mib, 5, &snsr, &slen, NULL, 0) != -1)
-	have_power = (int) snsr.value;
+	have_ac = (int) snsr.value;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
     len = sizeof(value);
     if ((sysctl(results->mibs.pwr_mib, 3, &value, &len, NULL, 0)) == -1) {
         return;
     }
-    results->have_power = value;
+    results->power.have_ac = value;
 #endif
 
     // get batteries here
-    for (i = 0; i < results->battery_index; i++) {
+    for (i = 0; i < results->power.battery_index; i++) {
         bsd_generic_battery_state_get(results->mibs.bat_mib[i], results);
     }
 
-    for (i = 0; i < results->battery_index; i++)
+    for (i = 0; i < results->power.battery_index; i++)
         free(results->mibs.bat_mib[i]);
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-    double percent = 100 * (results->current_charge / results->last_full_charge);
+    double percent = 100 * (results->power.current_charge / results->power.last_full_charge);
 
-    results->battery_percent = (int) percent;
-    results->have_power = have_power;
+    results->power.percent = (int) percent;
+    results->power.have_ac = have_ac;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
     len = sizeof(value);
     if ((sysctl(results->mibs.bat_mib[0], 4, &value, &len, NULL, 0)) == -1) {
         return;
     }
 
-    results->battery_percent = value;
+    results->power.percent = value;
   
 #endif
 }
@@ -388,31 +556,34 @@ get_percent(int value, int max)
 static void 
 results_show(results_t results)
 {
-    if (results.have_power)
-	printf("[AC]: %d%%", results.battery_percent);
+    _memsize_kb_to_mb(&results.memory.used);
+    _memsize_kb_to_mb(&results.memory.total);
+    printf("[MEM] %luM/%luM (used/total) ", results.memory.used, results.memory.total);
+
+    if (results.power.have_ac)
+	printf("[AC]: %d%%", results.power.percent);
     else
-	printf("[DC]: %d%%", results.battery_percent);
+	printf("[DC]: %d%%", results.power.percent);
 
     printf(" [TEMP]: %dC", results.temperature);
 
-    if (results.have_mixer) {
-	    uint8_t 	    high = results.volume_right > results.volume_left ?
-	    results.volume_right : results.volume_left;
+    if (results.mixer.enabled) {
+	    uint8_t 	    high = results.mixer.volume_right > results.mixer.volume_left ?
+	    results.mixer.volume_right : results.mixer.volume_left;
 #if defined(__OpenBSD__) || defined(__NetBSD__)
 	if (audio_output_simple) {
 	    uint8_t 	    perc = get_percent(high, 255);
 	    printf(" [AUDIO]: %d%%", perc);
 	} else
-	    printf(" [AUDIO] L: %d R: %d", results.volume_left,
-		   results.volume_right);
+	    printf(" [AUDIO] L: %d R: %d", results.mixer.volume_left,
+		   results.mixer.volume_right);
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
 	if (audio_output_simple) {
 		uint8_t perc = get_percent(high, 100);
 		printf(" [AUDIO]: %d%%", perc);
 	} else
-		printf(" [AUDIO] L: %d R: %d", results.volume_left,
-		       results.volume_right);
-
+		printf(" [AUDIO] L: %d R: %d", results.mixer.volume_left,
+		       results.mixer.volume_right);
 #endif
     }
     printf("\n");
@@ -425,6 +596,7 @@ main(int argc, char **argv)
 
     memset(&results, 0, sizeof(results_t));
 
+    bsd_generic_meminfo(&results.memory);
     bool have_battery = bsd_generic_mibs_power_get(&results);
    
     if (have_battery) {
