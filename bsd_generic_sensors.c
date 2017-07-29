@@ -23,6 +23,8 @@ ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+// Build : cc -lm (file) -o (output)
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,15 +40,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <sys/ioctl.h>
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-#include <sys/swap.h>
-#include <sys/mount.h>
-#include <sys/sensors.h>
-#include <sys/audioio.h>
+# include <sys/swap.h>
+# include <sys/mount.h>
+# include <sys/sensors.h>
+# include <sys/audioio.h>
 #endif
 
 #if defined(__FreeBSD__) || defined(__DragonFly__)
-#include <sys/soundcard.h>
-#include <vm/vm_param.h>
+# include <sys/soundcard.h>
+# include <vm/vm_param.h>
 #endif
 
 static bool simple_mode = true;
@@ -576,7 +578,7 @@ static void bsd_generic_power_state(power_t * power)
 #endif
 }
 
-static int get_percent(int value, int max)
+static int percentage(int value, int max)
 {
         double avg = (max / 100.0);
         double tmp = value / avg;
@@ -590,7 +592,7 @@ static void results_show(results_t results)
 {
         _memsize_kb_to_mb(&results.memory.used);
         _memsize_kb_to_mb(&results.memory.total);
-        printf("[MEM] %luM/%luM (used/total) ", results.memory.used,
+        printf("[MEM]: %luM/%luM (used/total) ", results.memory.used,
                results.memory.total);
 
         if (results.power.have_ac)
@@ -607,7 +609,7 @@ static void results_show(results_t results)
                     volume_right : results.mixer.volume_left;
 #if defined(__OpenBSD__) || defined(__NetBSD__)
                 if (simple_mode) {
-                        uint8_t perc = get_percent(high, 255);
+                        uint8_t perc = percentage(high, 255);
                         printf(" [AUDIO]: %d%%", perc);
                 } else
                         printf(" [AUDIO] L: %d R: %d",
@@ -615,7 +617,7 @@ static void results_show(results_t results)
                                results.mixer.volume_right);
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
                 if (simple_mode) {
-                        uint8_t perc = get_percent(high, 100);
+                        uint8_t perc = percentage(high, 100);
                         printf(" [AUDIO]: %d%%", perc);
                 } else
                         printf(" [AUDIO] L: %d R: %d",
@@ -623,7 +625,7 @@ static void results_show(results_t results)
                                results.mixer.volume_right);
 #endif
         }
-        printf("\n");
+        printf(".\n");
 }
 
 int main(int argc, char **argv)
