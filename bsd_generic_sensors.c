@@ -155,12 +155,12 @@ bsd_generic_meminfo(meminfo_t *memory)
    inactive_pages = _sysctlfromname("vm.stats.vm.v_inactive_count", mib, 4,  &len);
    if (inactive_pages < 0) return;
 
-   *mem_used = (total_pages - free_pages - inactive_pages) * page_size;
-   _memsize_bytes_to_kb(&memory->mem_used);
+   memory->used = (total_pages - free_pages - inactive_pages) * page_size;
+   _memsize_bytes_to_kb(&memory->used);
 
    result = _sysctlfromname("vfs.bufspace", mib, 2, &len);
    if (result < 0) return;
-   memori->buffered = (result);
+   memory->buffered = (result);
    _memsize_bytes_to_kb(&memory->buffered);
 
    result = _sysctlfromname("vm.stats.vm.v_active_count", mib, 4, &len);
@@ -489,7 +489,7 @@ bsd_generic_battery_state_get(int *mib, results_t * results)
     unsigned int value;
     size_t len = sizeof(value);
     if ((sysctl(mib, 4, &value, &len, NULL, 0)) != -1)
-       results->power.battery_percent = value;
+       results->power.percent = value;
 
 #endif
 }
