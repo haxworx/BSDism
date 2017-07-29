@@ -49,9 +49,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <vm/vm_param.h>
 #endif
 
-static bool audio_output_simple = true;
+static bool simple_mode = true;
 
-/* Storage for sensor access (ioctl) */
+#define MAX_BATTERIES 5
+
+int mibs[5];
+int *bat_mibs[MAX_BATTERIES];
+
 #if defined(__OpenBSD__) || defined(__NetBSD__)
 static char *sensor_name = NULL;
 size_t slen = sizeof(struct sensor);
@@ -60,12 +64,6 @@ struct sensordev snsrdev;
 size_t sdlen = sizeof(struct sensordev);
 int devn;
 #endif
-
-/* If there is > 1 battery just add the values */
-#define MAX_BATTERIES 5
-
-int mibs[5];
-int *bat_mibs[5];
 
 typedef struct {
         unsigned long total;
@@ -611,7 +609,7 @@ static void results_show(results_t results)
                     results.mixer.volume_left ? results.mixer.
                     volume_right : results.mixer.volume_left;
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-                if (audio_output_simple) {
+                if (simple_mode) {
                         uint8_t perc = get_percent(high, 255);
                         printf(" [AUDIO]: %d%%", perc);
                 } else
@@ -619,7 +617,7 @@ static void results_show(results_t results)
                                results.mixer.volume_left,
                                results.mixer.volume_right);
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
-                if (audio_output_simple) {
+                if (simple_mode) {
                         uint8_t perc = get_percent(high, 100);
                         printf(" [AUDIO]: %d%%", perc);
                 } else
@@ -634,18 +632,19 @@ static void results_show(results_t results)
 int main(int argc, char **argv)
 {
         results_t results;
+        bool have_battery;
 
         memset(&results, 0, sizeof(results_t));
 
         bsd_generic_meminfo(&results.memory);
 
-        bool have_battery = bsd_generic_mibs_power_get(&results);
-
+        have_battery = bsd_generic_mibs_power_get(&results);
         if (have_battery) {
                 bsd_generic_power_state(&results.power);
         }
 
         bsd_generic_temperature_state(&results.temperature);
+
         bsd_generic_audio_state_master(&results.mixer);
 
         results_show(results);

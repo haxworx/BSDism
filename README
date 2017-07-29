@@ -1,19 +1,15 @@
-Some sensors tools for statuslines on:
+# BSD sensors
 
-FreeBSD and DragonFly BSD and
+Supporting FreeBSD, DragonFlyBSD and OpenBSD.
 
-OpenBSD and NetBSD.
+# Power, temperature, memory and audio info.
 
-Included a tmux.conf.
-
-[ACTION BOUND to 'j']
-
-Binding CTRL + ACTION + u = volume up
-	CTRL + ACTION + j = volume down
-
+Includes a tmux.conf:
+        action key 'j'
+                bindings
+                        C^ + action + u (volume up)
+                        C^ + action + j (volume down)
 Install:
-	make
-
-Do enjoy!
+	gmake
 
 Al Poole <netstar@gmail.com>
