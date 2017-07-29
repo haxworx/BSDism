@@ -465,17 +465,17 @@ static int bsd_generic_mibs_power_get(results_t * results)
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
         if ((sysctlbyname("hw.acpi.battery.life", NULL, &len, NULL, 0)) !=
             -1) {
-                results->mibs.bat_mibs[results->power.battery_index] =
+                bat_mibs[results->power.battery_index] =
                     malloc(sizeof(int) * 5);
                 sysctlnametomib("hw.acpi.battery.life",
-                                results->mibss.bat_mib[results->power.
+                                bat_mibs[results->power.
                                                       battery_index],
                                 &len);
                 result++;
         }
 
         if ((sysctlbyname("hw.acpi.acline", NULL, &len, NULL, 0)) != -1) {
-                sysctlnametomib("hw.acpi.acline", results->mibs,
+                sysctlnametomib("hw.acpi.acline", mibs,
                                 &len);
         }
 #endif
@@ -546,7 +546,7 @@ static void bsd_generic_power_state(power_t * power)
                 have_ac = (int) snsr.value;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
         len = sizeof(value);
-        if ((sysctl(results->mibs, 3, &value, &len, NULL, 0)) ==
+        if ((sysctl(mibs, 3, &value, &len, NULL, 0)) ==
             -1) {
                 return;
         }
@@ -571,7 +571,7 @@ static void bsd_generic_power_state(power_t * power)
         power->have_ac = have_ac;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
         len = sizeof(value);
-        if ((sysctl(results->mibs.bat_mib[0], 4, &value, &len, NULL, 0)) ==
+        if ((sysctl(bat_mibs[0], 4, &value, &len, NULL, 0)) ==
             -1) {
                 return;
         }
