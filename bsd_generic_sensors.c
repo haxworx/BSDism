@@ -417,7 +417,7 @@ static void bsd_generic_temperature_state(uint8_t *temperature)
 /* just add the values for all batteries. */
 
 
-static int bsd_generic_mibs_power_get(results_t * results)
+static int bsd_generic_mibs_power_get(power_t *power)
 {
         int result = 0;
 #if defined(__OpenBSD__) || defined(__NetBSD__)
@@ -441,12 +441,10 @@ static int bsd_generic_mibs_power_get(results_t * results)
                         char buf[64];
                         snprintf(buf, sizeof(buf), "acpibat%d", i);
                         if (!strcmp(buf, snsrdev.xname)) {
-                                bat_mibs[results->power.
-                                                      battery_index] =
+                                bat_mibs[power->battery_index] =
                                     malloc(sizeof(int) * 5);
                                 int *tmp =
-                                    bat_mibs[results->power.
-                                                          battery_index++];
+                                    bat_mibs[power->battery_index++];
                                 tmp[0] = mib[0];
                                 tmp[1] = mib[1];
                                 tmp[2] = mib[2];
@@ -463,11 +461,10 @@ static int bsd_generic_mibs_power_get(results_t * results)
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
         if ((sysctlbyname("hw.acpi.battery.life", NULL, &len, NULL, 0)) !=
             -1) {
-                bat_mibs[results->power.battery_index] =
+                bat_mibs[power->battery_index] =
                     malloc(sizeof(int) * 5);
                 sysctlnametomib("hw.acpi.battery.life",
-                                bat_mibs[results->power.
-                                                      battery_index],
+                                bat_mibs[power->battery_index],
                                 &len);
                 result++;
         }
@@ -638,7 +635,7 @@ int main(int argc, char **argv)
 
         bsd_generic_meminfo(&results.memory);
 
-        have_battery = bsd_generic_mibs_power_get(&results);
+        have_battery = bsd_generic_mibs_power_get(&results.power);
         if (have_battery) {
                 bsd_generic_power_state(&results.power);
         }
