@@ -52,6 +52,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #endif
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
+// kern.cp_time2 is still incomplete spec.
+// there is a good reason for using 6 here. I cannot remember why though!
 # define CPU_STATES 6
 #endif
 
