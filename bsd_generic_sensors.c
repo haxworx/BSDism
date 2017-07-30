@@ -146,6 +146,7 @@ static void bsd_cpuinfo(cpu_core_t ** cores, int ncpu)
 {
 	size_t size;
 	int percent, diff_total, diff_idle;
+	int i, j;
 	double ratio;
 	unsigned long total, idle, used;
 	cpu_core_t *core;
@@ -158,7 +159,7 @@ static void bsd_cpuinfo(cpu_core_t ** cores, int ncpu)
 	if (sysctlbyname("kern.cp_times", cpu_times, &size, NULL, 0) < 0)
 		return;
 
-	for (int i = 0; i < ncpu; i++) {
+	for (i = 0; i < ncpu; i++) {
 		core = cores[i];
 		unsigned long *cpu = cpu_times[i];
 
@@ -200,7 +201,7 @@ static void bsd_cpuinfo(cpu_core_t ** cores, int ncpu)
 			return;
 
 		total = 0;
-		for (int j = 0; j < CPU_STATES; j++)
+		for (j = 0; j < CPU_STATES; j++)
 			total += cpu_times[j];
 
 		idle = cpu_times[4];
@@ -223,7 +224,7 @@ static void bsd_cpuinfo(cpu_core_t ** cores, int ncpu)
 		core->total = total;
 		core->idle = idle;
 	} else if (ncpu > 1) {
-		for (int i = 0; i < ncpu; i++) {
+		for (i = 0; i < ncpu; i++) {
 			core = cores[i];
 			int cpu_time_mib[] = { CTL_KERN, KERN_CPTIME2, 0 };
 			size = CPU_STATES * sizeof(unsigned long);
@@ -234,7 +235,7 @@ static void bsd_cpuinfo(cpu_core_t ** cores, int ncpu)
 				return;
 
 			total = 0;
-			for (int j = 0; j < CPU_STATES - 1; j++)
+			for (j = 0; j < CPU_STATES - 1; j++)
 				total += cpu_times[j];
 
 			idle = cpu_times[4];
@@ -516,6 +517,7 @@ static void bsd_generic_temperature_state(uint8_t * temperature)
 {
 #if defined(__OpenBSD__) || defined(__NetBSD__)
 	int mib[5] = { CTL_HW, HW_SENSORS, 0, 0, 0 };
+	int devn, numt;
 	memcpy(&mibs, mib, sizeof(int) * 5);
 	struct sensor snsr;
 	size_t slen = sizeof(struct sensor);
@@ -523,7 +525,7 @@ static void bsd_generic_temperature_state(uint8_t * temperature)
 	size_t sdlen = sizeof(struct sensordev);
 	static const char *sensor_name = NULL;
 
-	for (int devn = 0;; devn++) {
+	for (devn = 0;; devn++) {
 		mibs[2] = devn;
 
 		if (sysctl(mibs, 3, &snsrdev, &sdlen, NULL, 0) == -1) {
@@ -541,7 +543,7 @@ static void bsd_generic_temperature_state(uint8_t * temperature)
 		}
 	}
 
-	for (int numt = 0; numt < snsrdev.maxnumt[SENSOR_TEMP]; numt++) {
+	for (numt = 0; numt < snsrdev.maxnumt[SENSOR_TEMP]; numt++) {
 		mibs[4] = numt;
 
 		if (sysctl(mibs, 5, &snsr, &slen, NULL, 0) == -1)
@@ -576,13 +578,13 @@ static int bsd_generic_power_mibs_get(power_t * power)
 	struct sensordev snsrdev;
 	size_t sdlen = sizeof(struct sensordev);
 	int mib[5] = { CTL_HW, HW_SENSORS, 0, 0, 0 };
-
+	int i, devn;
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
 	size_t len;
 #endif
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-	for (int devn = 0;; devn++) {
+	for (devn = 0;; devn++) {
 		mib[2] = devn;
 		if (sysctl(mib, 3, &snsrdev, &sdlen, NULL, 0) == -1) {
 			if (errno == ENXIO)
@@ -591,7 +593,7 @@ static int bsd_generic_power_mibs_get(power_t * power)
 				break;
 		}
 
-		for (int i = 0; i < MAX_BATTERIES; i++) {
+		for (i = 0; i < MAX_BATTERIES; i++) {
 			char buf[64];
 			snprintf(buf, sizeof(buf), "acpibat%d", i);
 			if (!strcmp(buf, snsrdev.xname)) {
