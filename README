@@ -1,8 +1,10 @@
 # BSD sensors
 
+# CPU, memory, power, audio and temperature.
+
 Supporting FreeBSD, DragonFlyBSD and OpenBSD.
 
-# Power, temperature, memory and audio info.
+Supporting multiple cores.
 
 Includes a tmux.conf:
         action key 'j'
@@ -10,6 +12,6 @@ Includes a tmux.conf:
                         C^ + action + u (volume up)
                         C^ + action + j (volume down)
 Install:
-	gmake
+	make (or gmake)
 
 Al Poole <netstar@gmail.com>
