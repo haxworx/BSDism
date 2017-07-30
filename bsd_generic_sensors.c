@@ -107,6 +107,8 @@ typedef struct {
 
 typedef struct results_t results_t;
 struct results_t {
+        cpu_core_t **cores;
+        int cpu_count;
         meminfo_t memory;
         power_t power;
         mixer_t mixer;
@@ -768,8 +770,18 @@ static int percentage(int value, int max)
         return (result);
 }
 
-static void results_show(results_t results)
+static void results_display(results_t results)
 {
+        int i;
+        int cpu_percent = 0;
+
+        for (i = 0; i < results.cpu_count; i++) {
+                cpu_percent += results.cores[i]->percent;
+                free(results.cores[i]);
+        }
+
+        printf("[CPU]: %d%% ", cpu_percent / results.cpu_count);
+
         _memsize_kb_to_mb(&results.memory.used);
         _memsize_kb_to_mb(&results.memory.total);
         printf("[MEM]: %luM/%luM (used/total) ", results.memory.used,
@@ -780,7 +792,7 @@ static void results_show(results_t results)
         else
                 printf("[DC]: %d%%", results.power.percent);
 
-        printf(" [TEMP]: %dC", results.temperature);
+        printf(" [T]: %dC", results.temperature);
 
         if (results.mixer.enabled) {
                 uint8_t high =
@@ -790,17 +802,17 @@ static void results_show(results_t results)
 #if defined(__OpenBSD__) || defined(__NetBSD__)
                 if (simple_mode) {
                         uint8_t perc = percentage(high, 255);
-                        printf(" [AUDIO]: %d%%", perc);
+                        printf(" [VOL]: %d%%", perc);
                 } else
-                        printf(" [AUDIO] L: %d R: %d",
+                        printf(" [VOL] L: %d R: %d",
                                results.mixer.volume_left,
                                results.mixer.volume_right);
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
                 if (simple_mode) {
                         uint8_t perc = percentage(high, 100);
-                        printf(" [AUDIO]: %d%%", perc);
+                        printf(" [VOL]: %d%%", perc);
                 } else
-                        printf(" [AUDIO] L: %d R: %d",
+                        printf(" [VOL] L: %d R: %d",
                                results.mixer.volume_left,
                                results.mixer.volume_right);
 #endif
@@ -812,8 +824,6 @@ int main(int argc, char **argv)
 {
         results_t results;
         bool have_battery;
-        cpu_core_t **cores;
-        int i, cpu_count = 0;
 
         memset(&results, 0, sizeof(results_t));
 
@@ -828,14 +838,9 @@ int main(int argc, char **argv)
 
         bsd_generic_audio_state_master(&results.mixer);
 
-        cores = bsd_generic_cpuinfo(&cpu_count);
+        results.cores = bsd_generic_cpuinfo(&results.cpu_count);
 
-        for (i = 0; i < cpu_count; i++) {
-                printf("it is %d\n", cores[i]->percent);
-                free(cores[i]);
-        }
-
-        results_show(results);
+        results_display(results);
 
         return (EXIT_SUCCESS);
 }
