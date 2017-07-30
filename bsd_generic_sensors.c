@@ -419,7 +419,7 @@ static void bsd_generic_temperature_state(uint8_t *temperature)
 /* just add the values for all batteries. */
 
 
-static int bsd_generic_mibs_power_get(power_t *power)
+static int bsd_generic_power_mibs_get(power_t *power)
 {
         int result = 0;
 #if defined(__OpenBSD__) || defined(__NetBSD__)
@@ -637,7 +637,7 @@ int main(int argc, char **argv)
 
         bsd_generic_meminfo(&results.memory);
 
-        have_battery = bsd_generic_mibs_power_get(&results.power);
+        have_battery = bsd_generic_power_mibs_get(&results.power);
         if (have_battery) {
                 bsd_generic_power_state(&results.power);
         }
