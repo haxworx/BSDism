@@ -67,7 +67,6 @@ int mibs[5];
 int *bat_mibs[MAX_BATTERIES];
 
 #if defined(__OpenBSD__) || defined(__NetBSD__)
-static char *sensor_name = NULL;
 size_t slen = sizeof(struct sensor);
 struct sensor snsr;
 struct sensordev snsrdev;
@@ -174,19 +173,21 @@ static void bsd_cpuinfo(cpu_core_t **cores, int ncpu)
      {
         core = cores[i];
         unsigned long *cpu = cpu_times[i];
-        double total = 0;
-
+        
+        total = 0;
         for (j = 0; j < CPU_STATES; j++)
            total += cpu[j];
 
+        idle = cpu[4];
 
-        int diff_total = total - core->total;
-        int diff_idle = cpu[4] - core->idle;
+        diff_total = total - core->total;
+        diff_idle = idle - core->idle;
 
-        if (diff_total == 0) diff_total = 1;
+        if (diff_total == 0)
+                diff_total = 1;
 
         ratio = diff_total / 100.0;
-        unsigned long used = diff_total - diff_idle;
+        used = diff_total - diff_idle;
 
         percent = used / ratio;
         if (percent > 100)
@@ -196,7 +197,7 @@ static void bsd_cpuinfo(cpu_core_t **cores, int ncpu)
 
         core->percent = percent;
         core->total = total;
-        core->idle = cpu[4];
+        core->idle = idle;
      }
 #elif defined(__OpenBSD__)
    unsigned long cpu_times[CPU_STATES];
@@ -255,7 +256,7 @@ static void bsd_cpuinfo(cpu_core_t **cores, int ncpu)
 
              diff_idle = idle - core->idle;
 
-             ratio = diff_total / 100;
+             ratio = diff_total / 100.0;
              used = diff_total - diff_idle;
              percent = used / ratio;
 
@@ -530,6 +531,7 @@ static void bsd_generic_temperature_state(uint8_t *temperature)
 #if defined(__OpenBSD__) || defined(__NetBSD__)
         int mib[5] = { CTL_HW, HW_SENSORS, 0, 0, 0 };
         memcpy(&mibs, mib, sizeof(int) * 5);
+        static char *sensor_name = NULL;
 
         for (devn = 0;; devn++) {
                 mibs[2] = devn;
@@ -769,10 +771,13 @@ static void results_display(results_t results)
                 free(results.cores[i]);
         }
 
+        free(results.cores);
+
         printf("[CPU]: %d%% ", cpu_percent / results.cpu_count);
 
         _memsize_kb_to_mb(&results.memory.used);
         _memsize_kb_to_mb(&results.memory.total);
+
         printf("[MEM]: %luM/%luM (used/total) ", results.memory.used,
                results.memory.total);
 
