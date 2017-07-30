@@ -201,14 +201,13 @@ static void bsd_cpuinfo(cpu_core_t ** cores, int ncpu)
 			return;
 
 		total = 0;
-		for (j = 0; j < CPU_STATES; j++)
+		for (j = 0; j < CPU_STATES - 1; j++)
 			total += cpu_times[j];
 
 		idle = cpu_times[4];
 
 		diff_total = total - core->total;
 		diff_idle = idle - core->idle;
-
 		if (diff_total == 0)
 			diff_total = 1;
 
