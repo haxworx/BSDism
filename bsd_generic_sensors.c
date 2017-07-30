@@ -283,7 +283,7 @@ static cpu_core_t **bsd_generic_cpuinfo(int *ncpu)
 {
    cpu_core_t **cores;
    int i;
-   int prev_perc = 0;
+   unsigned int prev_perc = 0;
    unsigned long prev_idle = 0, prev_total = 0;
    
    *ncpu = cpu_count();
