@@ -53,6 +53,14 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 static bool simple_mode = true;
 
+#if defined(__OpenBSD__) || defined(__NetBSD__)
+# define CPU_STATES 6
+#endif
+
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+# define CPU_STATES 5
+#endif
+
 #define MAX_BATTERIES 5
 
 int mibs[5];
@@ -66,6 +74,12 @@ struct sensordev snsrdev;
 size_t sdlen = sizeof(struct sensordev);
 int devn;
 #endif
+
+typedef struct {
+        int percent;
+        unsigned long total;
+        unsigned long idle;
+} cpu_core_t;
 
 typedef struct {
         unsigned long total;
@@ -99,6 +113,20 @@ struct results_t {
         uint8_t temperature;
 };
 
+static int
+cpu_count(void)
+{
+   int cores = 0;
+#if defined(__FreeBSD__) || defined(__DragonFly__) || defined(__OpenBSD__)
+   size_t len;
+   int mib[2] = { CTL_HW, HW_NCPU };
+
+   len = sizeof(cores);
+   if (sysctl(mib, 2, &cores, &len, NULL, 0) < 0) return 0;
+#endif
+   return cores;
+}
+
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 static long int
 _sysctlfromname(const char *name, void *mib, int depth, size_t * len)
@@ -122,6 +150,155 @@ void _memsize_bytes_to_kb(unsigned long *bytes)
 }
 
 #define _memsize_kb_to_mb _memsize_bytes_to_kb
+
+
+static void bsd_cpuinfo(int ncpu,
+                        unsigned long *prev_total,
+                        unsigned long *prev_idle,
+                        unsigned int  *prev_percent,
+                        cpu_core_t    **cores)
+{
+
+   size_t size;
+   unsigned long percent_all = 0, total_all = 0, idle_all = 0;
+   int i, j;
+   cpu_core_t *core;
+#if defined(__FreeBSD__) || defined(__DragonFly__)
+   if (!ncpu) return;
+   size =  sizeof(unsigned long) * (CPU_STATES * ncpu);
+   unsigned long cpu_times[ncpu][CPU_STATES];
+
+   if (sysctlbyname("kern.cp_times", cpu_times, &size, NULL, 0) < 0)
+     return;
+
+   for (i = 0; i < ncpu; i++)
+     {
+        unsigned long *cpu = cpu_times[i];
+        double total = 0;
+
+        for (j = 0; j < CPU_STATES; j++)
+           total += cpu[j];
+
+        core = cores[i];
+
+        int diff_total = total - core->total;
+        int diff_idle = cpu[4] - core->idle;
+
+        if (diff_total == 0) diff_total = 1;
+
+        double ratio = diff_total / 100.0;
+        unsigned long used = diff_total - diff_idle;
+
+        int percent = used / ratio;
+        if (percent > 100)
+           percent = 100;
+        else if (percent < 0)
+           percent = 0;
+
+        core->percent = percent;
+        core->total = total;
+        core->idle = cpu[4];
+
+        percent_all += (int) percent;
+        total_all += total;
+        idle_all += core->idle;
+     }
+   *prev_total = total_all / ncpu;
+   *prev_idle = idle_all / ncpu;
+   *prev_percent = (int) (percent_all / ncpu);
+#elif defined(__OpenBSD__)
+   if (!ncpu) return;
+   if (ncpu == 1)
+     {
+        unsigned long cpu_times[CPU_STATES];
+        int cpu_time_mib[] = { CTL_KERN, KERN_CPTIME };
+        size = CPU_STATES * sizeof(unsigned long);
+        if (sysctl(cpu_time_mib, 2, &cpu_times, &size, NULL, 0) < 0)
+          return;
+
+        unsigned long total = 0;
+        for (j = 0; j < CPU_STATES; j++)
+          total += cpu_times[j];
+
+        unsigned long idle = cpu_times[4];
+
+        int diff_total = total - *prev_total;
+        int diff_idle = idle - *prev_idle;
+
+        if (diff_total == 0) diff_total = 1;
+
+        double ratio = diff_total / 100.0;
+        unsigned long used = diff_total - diff_idle;
+        int percent = used / ratio;
+        if (percent > 100)
+          percent = 100;
+        else if (percent < 0)
+          percent = 0;
+
+        *prev_total = total;
+        *prev_idle = idle; // cpu_times[3];
+        *prev_percent = (int) percent;
+     }
+   else if (ncpu > 1)
+     {
+        for (i = 0; i < ncpu; i++)
+          {
+             unsigned long cpu_times[CPU_STATES];
+             size = CPU_STATES * sizeof(unsigned long);
+             int cpu_time_mib[] = { CTL_KERN, KERN_CPTIME2, 0 };
+             cpu_time_mib[2] = i;
+             if (sysctl(cpu_time_mib, 3, &cpu_times, &size, NULL, 0) < 0)
+               return;
+
+             unsigned long total = 0;
+             for (j = 0; j < CPU_STATES - 1; j++)
+               total += cpu_times[j];
+
+             core = cores[i];
+             int diff_total = total - core->total;
+             int diff_idle  = cpu_times[4] - core->idle;
+
+             core->total = total;
+             core->idle = cpu_times[4];
+             if (diff_total == 0) diff_total = 1;
+             double ratio = diff_total / 100;
+             unsigned long used = diff_total - diff_idle;
+             int percent = used / ratio;
+             if (percent > 100) percent = 100;
+             else if (percent < 0) percent = 0;
+             core->percent = percent;
+
+             percent_all += (int) percent;
+             total_all += total;
+             idle_all += core->idle;
+          }
+        *prev_total =  (total_all / ncpu);
+        *prev_idle =   (idle_all / ncpu);
+        *prev_percent = (percent_all / ncpu) + (percent_all % ncpu);
+     }
+#endif
+}
+
+static cpu_core_t **bsd_generic_cpuinfo(int *ncpu)
+{
+   cpu_core_t **cores;
+   int i;
+   int prev_perc = 0;
+   unsigned long prev_idle = 0, prev_total = 0;
+   
+   *ncpu = cpu_count();
+
+   cores = malloc((*ncpu) * sizeof(cpu_core_t *));
+
+   for (i = 0; i < *ncpu; i++)
+        cores[i] = calloc(1, sizeof(cpu_core_t));
+
+   bsd_cpuinfo(*ncpu, &prev_total, &prev_idle, &prev_perc, cores);
+   usleep(1000000);
+   bsd_cpuinfo(*ncpu, &prev_total, &prev_idle, &prev_perc, cores);
+   
+   return cores;
+}
 
 static void bsd_generic_meminfo(meminfo_t * memory)
 {
@@ -578,6 +755,9 @@ static void bsd_generic_power_state(power_t * power)
 #endif
 }
 
+
+
+
 static int percentage(int value, int max)
 {
         double avg = (max / 100.0);
@@ -632,6 +812,8 @@ int main(int argc, char **argv)
 {
         results_t results;
         bool have_battery;
+        cpu_core_t **cores;
+        int i, cpu_count = 0;
 
         memset(&results, 0, sizeof(results_t));
 
@@ -645,6 +827,13 @@ int main(int argc, char **argv)
         bsd_generic_temperature_state(&results.temperature);
 
         bsd_generic_audio_state_master(&results.mixer);
+
+        cores = bsd_generic_cpuinfo(&cpu_count);
+
+        for (i = 0; i < cpu_count; i++) {
+                printf("it is %d\n", cores[i]->percent);
+                free(cores[i]);
+        }
 
         results_show(results);
 
